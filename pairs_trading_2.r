@@ -1,6 +1,6 @@
 library(quantmod)
 library(dplyr)
-setwd("C:/Users/Maciek/SGH_Magisterka")  # Set your working directory
+setwd("C:/Users/mlube/trading_strategies_eval")  # Set your working directory
 
 top_10 <- symbols <- c(
   "AAPL",   # Apple
@@ -126,11 +126,11 @@ for (pair in pair_names) {
   signal_col <- paste0(pair, "_Signal")
   sp500_data_adj_strat[[signal_col]] <- NA_integer_
   # Buy signal when Z-Score is below -2
-  sp500_data_adj_strat[[signal_col]][sp500_data_adj_strat[[z_score_col]] < -2] <- -1
+  sp500_data_adj_strat[[signal_col]][sp500_data_adj_strat[[z_score_col]] < -2] <- 'BUY'
   # Sell signal when Z-Score is above 2
   sp500_data_adj_strat[[signal_col]][sp500_data_adj_strat[[z_score_col]] > 2] <- "SELL"
-  # Exit signal when Z-Score is between -1 and 1
-  sp500_data_adj_strat[[signal_col]][sp500_data_adj_strat[[z_score_col]] >= -1 & sp500_data_adj_strat[[z_score_col]] <= 1] <- "EXIT"
+#   # Exit signal when Z-Score is between -0.2 and 0.2
+# sp500_data_adj_strat[[signal_col]][sp500_data_adj_strat[[z_score_col]] >= -0.2 & sp500_data_adj_strat[[z_score_col]] <= 0.2] <- "EXIT"
 }
 
 # For each pair plot difference, Z-Score, and signals
@@ -148,8 +148,8 @@ for (pair in pair_names) {
     geom_point(aes(color = .data[[signal_col]]), size = 1.5) +
     labs(title = paste("Z-Score for", pair), x = "Date", y = "Z-Score") +
     theme_minimal() +
-    scale_color_manual(values = c("BUY" = "green", "SELL" = "red", "EXIT" = "purple"),
-                       labels = c("BUY" = "Buy Signal", "SELL" = "Sell Signal", "EXIT" = "Exit Signal")) +
+    scale_color_manual(values = c("BUY" = "green", "SELL" = "red", "EXIT" = "black"),
+                       labels = c("BUY" = "Buy Signal", "SELL" = "Sell Signal",  "EXIT" = 'black')) +
     theme(legend.title = element_blank())
   
     ggsave(
@@ -162,8 +162,87 @@ for (pair in pair_names) {
 
 colnames(sp500_data_adj_strat)
 
-# Set positions based on signals for each pair
+library(PerformanceAnalytics)
+
+sp500_data_adj_strat <- sp500_data_adj_strat[order(sp500_data_adj_strat$Date), ]
+portfolio_list <- list()
 for (pair in pair_names) {
+  pairs_singal_col <- paste0(pair, "_Signal")
+  first_cumret_col <- paste0(strsplit(pair, "_")[[1]][1], "_cumret")
+  second_cumret_col <- paste0(strsplit(pair, "_")[[1]][2], "_cumret")
+  spread_zscore <- paste0(pair, "_ZScore")
+  portfolio <- list(
+    pair_name = pair,
+    enter_cumret_first_stock = NA_real_,
+    enter_cumret_second_stock = NA_real_,
+    current_position = NULL,
+    final_capital = NA_real_,
+    returns = xts(order.by = as.Date(character())),
+    Sharpe = NA_real_
+  )
+  for (i in 1:nrow(sp500_data_adj_strat)) {
+    current_signal <- sp500_data_adj_strat[[pairs_singal_col]][i]
+    current_position <- portfolio$current_position
+    if (is.null(current_position) || is.na(current_position) || current_position == "") {
+      if (is.na(current_signal) || current_signal == "") {
+        next
+      } else if (current_signal == "BUY" || current_signal == "SELL") {
+        portfolio$enter_cumret_first_stock <- sp500_data_adj_strat[[first_cumret_col]][i]
+        portfolio$enter_cumret_second_stock <- sp500_data_adj_strat[[second_cumret_col]][i]
+        portfolio$current_position <- current_signal
+      }
+    } else if (current_position == "BUY") {
+      if ((sp500_data_adj_strat[[spread_zscore]][i] <= 0) || (i == nrow(sp500_data_adj_strat))) { 
+        long_pos_return <- log(portfolio$enter_cumret_first_stock) - log(sp500_data_adj_strat[[first_cumret_col]][i])
+        short_pos_return <- log(sp500_data_adj_strat[[second_cumret_col]][i]) - log(portfolio$enter_cumret_second_stock)
+        ret_value <- 0.5 * (long_pos_return + short_pos_return)
+        ret_date <- sp500_data_adj_strat$Date[i]
+        portfolio$returns <- rbind(portfolio$returns, xts(ret_value, order.by = ret_date))
+        portfolio$current_equity <- portfolio$current_equity * (1 + 0.5 * (long_pos_return + short_pos_return))
+        portfolio$current_position <- NULL
+      } else if (sp500_data_adj_strat[[spread_zscore]][i] > 0) {
+        next  # Skip to the next iteration if already in a BUY position
+      } else {
+        print("Missing Data on BUY position")
+      }
+    } else if (current_position == "SELL") {
+      if ((sp500_data_adj_strat[[spread_zscore]][i] >= 0) || (i == nrow(sp500_data_adj_strat))) {
+        long_pos_return <- log(sp500_data_adj_strat[[second_cumret_col]][i]) - log(portfolio$enter_cumret_second_stock)
+        short_pos_return <- log(portfolio$enter_cumret_first_stock) - log(sp500_data_adj_strat[[first_cumret_col]][i])
+        ret_value <- 0.5 * (long_pos_return + short_pos_return)
+        ret_date <- sp500_data_adj_strat$Date[i]
+        portfolio$returns <- rbind(portfolio$returns, xts(ret_value, order.by = ret_date))
+        portfolio$current_equity <- portfolio$current_equity * (1 + 0.5 * (long_pos_return + short_pos_return))
+        portfolio$current_position <- NULL
+      } else if (sp500_data_adj_strat[[spread_zscore]][i] < 0) {
+        next  # Skip to the next iteration if already in a SELL position
+      } else {
+        print("Missing Data on SELL position")
+      }
+    }
+  }
+  portfolio$Sharpe <- SharpeRatio(as.matrix(portfolio$returns), Rf = 0, FUN = "StdDev")
+  portfolio_list[[pair]] <- portfolio
+
+}
+names(portfolio_list)
+head(portfolio_list)
+
+names(sp500_data_adj_strat)
+
+sharpe_ratios <- sapply(portfolio_list, function(x) x$Sharpe)
+sharpe_ratios
 
 
+windows()
+hist(sharpe_ratios, main = "Sharpe Ratios of Pairs Trading Strategies", xlab = "Sharpe Ratio", col = "blue", breaks = 10)
+median_sharpe <- median(sharpe_ratios, na.rm = TRUE)
+average_sharpe <- mean(sharpe_ratios, na.rm = TRUE)
+abline(v = average_sharpe, col = "green", lwd = 2
+abline(v = median_sharpe, col = "red", lwd = 2, lty = 2)
+# Add legend to the histogram
+legend("topright", legend = paste("Mean =", round(average_sharpe, 2)), 
+       col = "green", lwd = 2)
+legend("topright", legend = paste("Median =", round(median_sharpe, 2)), 
+       col = "red", lwd = 2, lty = 2)
 
