@@ -1,6 +1,7 @@
 library(quantmod)
 library(dplyr)
-setwd("C:/Users/Maciek/SGH_magisterka")  # Set your working directory
+# setwd("C:/Users/Maciek/SGH_magisterka")
+setwd("C:/Users/mlube/trading_strategies_eval") 
 
 top_10 <- symbols <- c(
   "AAPL",   # Apple
@@ -14,7 +15,6 @@ top_10 <- symbols <- c(
   "ORCL",   # Oracle
   "CRM"     # Salesforce
 )
-
 
 load("sp500_data.RData")
 ls()
@@ -84,8 +84,6 @@ for (i in seq_along(pair_names)) {
   pair_stats$Mean[i] <- mean(values, na.rm = TRUE)
   pair_stats$SD[i] <- sd(values, na.rm = TRUE)
 }
-pair_stats
-
 start_date_strat <- as.Date("2023-01-01")
 end_date_strat <- as.Date("2023-06-30")
 
@@ -127,7 +125,7 @@ for (pair in pair_names) {
   sp500_data_adj_strat[[signal_col]] <- NA_integer_
   # Buy signal when Z-Score is below -2
   sp500_data_adj_strat[[signal_col]][sp500_data_adj_strat[[z_score_col]] < -2] <- 'BUY'
-  # Sell signal when Z-Score is above 20
+  # Sell signal when Z-Score is above 2
   sp500_data_adj_strat[[signal_col]][sp500_data_adj_strat[[z_score_col]] > 2] <- "SELL"
 #   # Exit signal when Z-Score is between -0.2 and 0.2
 # sp500_data_adj_strat[[signal_col]][sp500_data_adj_strat[[z_score_col]] >= -0.2 & sp500_data_adj_strat[[z_score_col]] <= 0.2] <- "EXIT"
@@ -148,7 +146,7 @@ for (pair in pair_names) {
     geom_point(aes(color = .data[[signal_col]]), size = 1.5) +
     labs(title = paste("Z-Score for", pair), x = "Date", y = "Z-Score") +
     theme_minimal() +
-    scale_color_manual(values = c("BUY" = "green", "SELL" = "red", "EXIT" = "black"),
+    scale_color_manual(values = c("BUY" = "green", "SELL" = "red", "EXIT" = 'black'),
                        labels = c("BUY" = "Buy Signal", "SELL" = "Sell Signal",  "EXIT" = 'black')) +
     theme(legend.title = element_blank())
   
@@ -162,7 +160,7 @@ for (pair in pair_names) {
 
 colnames(sp500_data_adj_strat)
 
-install.packages("PerformanceAnalytics")
+# install.packages("PerformanceAnalytics")
 library(PerformanceAnalytics)
 
 sp500_data_adj_strat <- sp500_data_adj_strat[order(sp500_data_adj_strat$Date), ]
@@ -172,6 +170,7 @@ for (pair in pair_names) {
   first_cumret_col <- paste0(strsplit(pair, "_")[[1]][1], "_cumret")
   second_cumret_col <- paste0(strsplit(pair, "_")[[1]][2], "_cumret")
   spread_zscore <- paste0(pair, "_ZScore")
+  trade_cost <- 0.001
   portfolio <- list(
     pair_name = pair,
     enter_cumret_first_stock = NA_real_,
@@ -180,7 +179,9 @@ for (pair in pair_names) {
     returns = xts(order.by = as.Date(character())),
     Sharpe = NA_real_,
     final_return = NA_real_,
-    current_equity = 1000
+    current_equity = 1000,
+    sum_returns = NA_real_,
+    mean_returns = NA_real_
   )
   for (i in 1:nrow(sp500_data_adj_strat)) {
     current_signal <- sp500_data_adj_strat[[pairs_singal_col]][i]
@@ -194,16 +195,16 @@ for (pair in pair_names) {
         portfolio$current_position <- current_signal
       }
     } else if (current_position == "BUY") {
-      if ((sp500_data_adj_strat[[spread_zscore]][i] <= 0) || (i == nrow(sp500_data_adj_strat))) { 
-        long_pos_return <- log(portfolio$enter_cumret_first_stock) - log(sp500_data_adj_strat[[first_cumret_col]][i])
-        short_pos_return <- log(sp500_data_adj_strat[[second_cumret_col]][i]) - log(portfolio$enter_cumret_second_stock)
-        ret_value <- 0.5 * (long_pos_return + short_pos_return)
+      if ((sp500_data_adj_strat[[spread_zscore]][i] < 0) || (i == nrow(sp500_data_adj_strat))) { 
+        long_pos_return <- log(sp500_data_adj_strat[[first_cumret_col]][i]) - log(portfolio$enter_cumret_first_stock)
+        short_pos_return <- log(portfolio$enter_cumret_second_stock) - log(sp500_data_adj_strat[[second_cumret_col]][i])
+        ret_value <- 0.5 * (long_pos_return + short_pos_return) - trade_cost  
         ret_date <- sp500_data_adj_strat$Date[i]
         portfolio$returns <- rbind(portfolio$returns, xts(ret_value, order.by = ret_date))
-        portfolio$current_equity <- portfolio$current_equity * (1 + 0.5 * (long_pos_return + short_pos_return))
+        portfolio$current_equity <- portfolio$current_equity * (1 + ret_value)
         portfolio$current_position <- NULL
       } else if (sp500_data_adj_strat[[spread_zscore]][i] > 0) {
-        next  # Skip to the next iteration if already in a BUY position
+        next
       } else {
         print("Missing Data on BUY position")
       }
@@ -211,35 +212,43 @@ for (pair in pair_names) {
       if ((sp500_data_adj_strat[[spread_zscore]][i] >= 0) || (i == nrow(sp500_data_adj_strat))) {
         long_pos_return <- log(sp500_data_adj_strat[[second_cumret_col]][i]) - log(portfolio$enter_cumret_second_stock)
         short_pos_return <- log(portfolio$enter_cumret_first_stock) - log(sp500_data_adj_strat[[first_cumret_col]][i])
-        ret_value <- 0.5 * (long_pos_return + short_pos_return)
+        ret_value <- 0.5 * (long_pos_return + short_pos_return) - trade_cost
         ret_date <- sp500_data_adj_strat$Date[i]
         portfolio$returns <- rbind(portfolio$returns, xts(ret_value, order.by = ret_date))
-        portfolio$current_equity <- portfolio$current_equity * (1 + 0.5 * (long_pos_return + short_pos_return))
+        portfolio$current_equity <- portfolio$current_equity * (1 + (ret_value))
         portfolio$current_position <- NULL
       } else if (sp500_data_adj_strat[[spread_zscore]][i] < 0) {
-        next  # Skip to the next iteration if already in a SELL position
+        next
       } else {
         print("Missing Data on SELL position")
       }
     }
   }
-  portfolio$Sharpe <- SharpeRatio(portfolio$returns, Rf = 0.01, FUN = "StdDev")
-  portfolio$final_return <- log(portfolio$current_equity) - log(1000)
+Sharpe.annualizde
+
+  portfolio$Sharpe <- SharpeRatio.annualized(portfolio$returns, Rf = 0, FUN = "StdDev")
+  portfolio$mean_returns <- mean(portfolio$returns, na.rm = TRUE)
+  portfolio$sum_returns <- sum(portfolio$returns, na.rm = TRUE)
   portfolio_list[[pair]] <- portfolio
 }
 
-names(portfolio_list)
-head(portfolio_list)
-
-names(sp500_data_adj_strat)
 
 sharpe_ratios <- sapply(portfolio_list, function(x) x$Sharpe)
-returns_list <- lapply(portfolio_list, function(x) x$returns)
-final_returns <- sapply(portfolio_list, function(x) x$final_return)
-sum_returns <- sapply(portfolio_list, function(x) sum(x$returns, na.rm = TRUE))
-names(returns_list)
+returns_list <- sapply(portfolio_list, function(x) x$returns)
+sum_returns <- sapply(portfolio_list, function(x) x$sum_returns)
+mean_returns <- sapply(portfolio_list, function(x) x$mean_returns)
 
-final_returns
+mean_returns
+# mean_returns <- sapply(portfolio_list, function(x) mean(x$returns, na.rm = TRUE))
+
+returns_list$AAPL_MSFT
+final_returns$AAPL_MSFT
+sum_returns['AAPL_MSFT']
+
+
+
+sharpe_ratios
+
 sum_returns
 
 windows()
@@ -258,6 +267,20 @@ abline(v = average_returns, col = "green", lwd = 2)
 legend("topright", legend = paste("Mean =", round(average_returns, 2)), 
        col = "green", lwd = 2)
 
+windows()
+hist(sum_returns, main = "Sum Returns of Pairs Trading Strategies", xlab = "Sum Returns", col = "blue", breaks = 10)
+mean_sum_returns <- mean(sum_returns, na.rm = TRUE)
+abline(v = mean_sum_returns, col = "green", lwd = 2)
+legend("topright", legend = paste("Mean =", round(mean_sum_returns, 2)),
+        col = "green", lwd = 2)
+
+windows()
+plot(mean_returns, type = "h", main = "Mean Returns of Pairs Trading Strategies", 
+     xlab = "Pairs", ylab = "Mean Returns", col = "blue", lwd = 2)
+mean_mean_returns <- mean(mean_returns, na.rm = TRUE)
+abline(h = mean_mean_returns, col = "green", lwd = 2)
+legend("topright", legend = paste("Mean =", round(mean_mean_returns, 2)), 
+       col = "green", lwd = 2)
 
 
 sharpe_ratios
