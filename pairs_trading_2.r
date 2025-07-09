@@ -1,6 +1,6 @@
 library(quantmod)
 library(dplyr)
-setwd("C:/Users/mlube/trading_strategies_eval")  # Set your working directory
+setwd("C:/Users/Maciek/SGH_magisterka")  # Set your working directory
 
 top_10 <- symbols <- c(
   "AAPL",   # Apple
@@ -127,7 +127,7 @@ for (pair in pair_names) {
   sp500_data_adj_strat[[signal_col]] <- NA_integer_
   # Buy signal when Z-Score is below -2
   sp500_data_adj_strat[[signal_col]][sp500_data_adj_strat[[z_score_col]] < -2] <- 'BUY'
-  # Sell signal when Z-Score is above 2
+  # Sell signal when Z-Score is above 20
   sp500_data_adj_strat[[signal_col]][sp500_data_adj_strat[[z_score_col]] > 2] <- "SELL"
 #   # Exit signal when Z-Score is between -0.2 and 0.2
 # sp500_data_adj_strat[[signal_col]][sp500_data_adj_strat[[z_score_col]] >= -0.2 & sp500_data_adj_strat[[z_score_col]] <= 0.2] <- "EXIT"
@@ -162,6 +162,7 @@ for (pair in pair_names) {
 
 colnames(sp500_data_adj_strat)
 
+install.packages("PerformanceAnalytics")
 library(PerformanceAnalytics)
 
 sp500_data_adj_strat <- sp500_data_adj_strat[order(sp500_data_adj_strat$Date), ]
@@ -176,9 +177,10 @@ for (pair in pair_names) {
     enter_cumret_first_stock = NA_real_,
     enter_cumret_second_stock = NA_real_,
     current_position = NULL,
-    final_capital = NA_real_,
     returns = xts(order.by = as.Date(character())),
-    Sharpe = NA_real_
+    Sharpe = NA_real_,
+    final_return = NA_real_,
+    current_equity = 1000
   )
   for (i in 1:nrow(sp500_data_adj_strat)) {
     current_signal <- sp500_data_adj_strat[[pairs_singal_col]][i]
@@ -221,28 +223,53 @@ for (pair in pair_names) {
       }
     }
   }
-  portfolio$Sharpe <- SharpeRatio(as.matrix(portfolio$returns), Rf = 0, FUN = "StdDev")
+  portfolio$Sharpe <- SharpeRatio(portfolio$returns, Rf = 0.01, FUN = "StdDev")
+  portfolio$final_return <- log(portfolio$current_equity) - log(1000)
   portfolio_list[[pair]] <- portfolio
-
 }
+
 names(portfolio_list)
 head(portfolio_list)
 
 names(sp500_data_adj_strat)
 
 sharpe_ratios <- sapply(portfolio_list, function(x) x$Sharpe)
-sharpe_ratios
+returns_list <- lapply(portfolio_list, function(x) x$returns)
+final_returns <- sapply(portfolio_list, function(x) x$final_return)
+sum_returns <- sapply(portfolio_list, function(x) sum(x$returns, na.rm = TRUE))
+names(returns_list)
 
+final_returns
+sum_returns
 
 windows()
 hist(sharpe_ratios, main = "Sharpe Ratios of Pairs Trading Strategies", xlab = "Sharpe Ratio", col = "blue", breaks = 10)
 median_sharpe <- median(sharpe_ratios, na.rm = TRUE)
 average_sharpe <- mean(sharpe_ratios, na.rm = TRUE)
-abline(v = average_sharpe, col = "green", lwd = 2
-abline(v = median_sharpe, col = "red", lwd = 2, lty = 2)
-# Add legend to the histogram
+abline(v = average_sharpe, col = "green", lwd = 2)
 legend("topright", legend = paste("Mean =", round(average_sharpe, 2)), 
        col = "green", lwd = 2)
-legend("topright", legend = paste("Median =", round(median_sharpe, 2)), 
-       col = "red", lwd = 2, lty = 2)
+
+windows()
+hist(final_returns, main = "Returns of Pairs Trading Strategies", xlab = "Returns", col = "blue", breaks = 10)
+median_returns <- median(final_returns, na.rm = TRUE)
+average_returns <- mean(final_returns, na.rm = TRUE)
+abline(v = average_returns, col = "green", lwd = 2)
+legend("topright", legend = paste("Mean =", round(average_returns, 2)), 
+       col = "green", lwd = 2)
+
+
+
+sharpe_ratios
+returns_list
+
+
+
+
+
+
+
+
+
+
 
