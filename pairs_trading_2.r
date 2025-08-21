@@ -1,7 +1,7 @@
 library(quantmod)
 library(dplyr)
-# setwd("C:/Users/Maciek/SGH_magisterka")
-setwd("C:/Users/mlube/trading_strategies_eval") 
+setwd("C:/Users/Maciek/SGH_magisterka")
+# setwd("C:/Users/mlube/trading_strategies_eval") 
 
 top_10 <- symbols <- c(
   "AAPL",   # Apple
@@ -56,6 +56,33 @@ for ( symbol in top_10) {
     cumret_col <- sp500_data_adj_hist[[adj_col]] / sp500_data_adj_hist[[adj_col]][1]
     sp500_data_adj_hist[[paste0(symbol, "_cumret")]] <- cumret_col}}
 
+
+
+# Plot cumulative returns for each stock
+library(ggplot2)
+cumulative_returns_list <- list()
+for (symbol in top_10) {
+  cumret_col <- paste0(symbol, "_cumret")
+  cumulative_returns_list[[symbol]] <- data.frame(
+    Date = sp500_data_adj_hist$Date,
+    Cumulative.Returns = sp500_data_adj_hist[[cumret_col]]
+  )
+}
+cumulative_returns_df <- do.call(rbind, lapply(names(cumulative_returns_list), function(symbol) {
+  data <- cumulative_returns_list[[symbol]]
+  data$ticker <- symbol
+  return(data)
+}))
+p <- ggplot(cumulative_returns_df, aes(x = Date, y = Cumulative.Returns, color = ticker)) +
+  geom_line() +
+  labs(title = "Skumulowane Zwroty 10 Najlepszych Akcji S&P 500",
+       x = "Data",
+       y = "Skumulowane Zwroty",
+       color = "Spółka") +
+  theme_minimal()
+
+ggsave("top_10_cumulative_returns.png", plot = p, width = 10, height = 6)
+
 colnames(sp500_data_adj_hist)
 
 # Generate all unique pairs (order matters: A_B != B_A)
@@ -100,6 +127,29 @@ for ( symbol in top_10) {
     cumret_col <- sp500_data_adj_strat[[adj_col]] / sp500_data_adj_strat[[adj_col]][1]
     sp500_data_adj_strat[[paste0(symbol, "_cumret")]] <- cumret_col}}
 
+# Plot cumulative returns for each stock in the strategy period
+cumulative_returns_list_strat <- list()
+for (symbol in top_10) {
+  cumret_col <- paste0(symbol, "_cumret")
+  cumulative_returns_list_strat[[symbol]] <- data.frame(
+    Date = sp500_data_adj_strat$Date,
+    Cumulative.Returns = sp500_data_adj_strat[[cumret_col]]
+  )
+}
+cumulative_returns_df_strat <- do.call(rbind, lapply(names(cumulative_returns_list_strat), function(symbol) {
+  data <- cumulative_returns_list_strat[[symbol]]
+  data$ticker <- symbol
+  return(data)
+}))
+p_strat <- ggplot(cumulative_returns_df_strat, aes(x = Date, y = Cumulative.Returns, color = ticker)) +
+  geom_line() +
+  labs(title = "Skumulowane Zwroty 10 Najlepszych Akcji S&P 500 (Strategia)",
+       x = "Data",
+       y = "Skumulowane Zwroty",
+       color = "Spółki") +
+  theme_minimal()
+ggsave("top_10_cumulative_returns_strat.png", plot = p_strat, width = 10, height = 6)
+
 # Calculate differences for each pair in the strategy period
 for (pair in pair_names) {
   sym1 <- strsplit(pair, "_")[[1]][1]
@@ -124,9 +174,9 @@ for (pair in pair_names) {
   signal_col <- paste0(pair, "_Signal")
   sp500_data_adj_strat[[signal_col]] <- NA_integer_
   # Buy signal when Z-Score is below -2
-  sp500_data_adj_strat[[signal_col]][sp500_data_adj_strat[[z_score_col]] < -2] <- 'BUY'
+  sp500_data_adj_strat[[signal_col]][sp500_data_adj_strat[[z_score_col]] < -2] <- 'LONG_SHORT'
   # Sell signal when Z-Score is above 2
-  sp500_data_adj_strat[[signal_col]][sp500_data_adj_strat[[z_score_col]] > 2] <- "SELL"
+  sp500_data_adj_strat[[signal_col]][sp500_data_adj_strat[[z_score_col]] > 2] <- "SHORT_LONG"
 #   # Exit signal when Z-Score is between -0.2 and 0.2
 # sp500_data_adj_strat[[signal_col]][sp500_data_adj_strat[[z_score_col]] >= -0.2 & sp500_data_adj_strat[[z_score_col]] <= 0.2] <- "EXIT"
 }
@@ -146,8 +196,8 @@ for (pair in pair_names) {
     geom_point(aes(color = .data[[signal_col]]), size = 1.5) +
     labs(title = paste("Z-Score for", pair), x = "Date", y = "Z-Score") +
     theme_minimal() +
-    scale_color_manual(values = c("BUY" = "green", "SELL" = "red", "EXIT" = 'black'),
-                       labels = c("BUY" = "Buy Signal", "SELL" = "Sell Signal",  "EXIT" = 'black')) +
+    scale_color_manual(values = c("LONG_SHORT" = "green", "SHORT_LONG" = "red"),
+                       labels = c("LONG_SHORT" = "Long/Short Signal", "SHORT_LONG" = "Short/Long Signal")) +
     theme(legend.title = element_blank())
   
     ggsave(
@@ -170,7 +220,7 @@ for (pair in pair_names) {
   first_cumret_col <- paste0(strsplit(pair, "_")[[1]][1], "_cumret")
   second_cumret_col <- paste0(strsplit(pair, "_")[[1]][2], "_cumret")
   spread_zscore <- paste0(pair, "_ZScore")
-  trade_cost <- 0.001
+  trade_cost <- 0.0001
   portfolio <- list(
     pair_name = pair,
     enter_cumret_first_stock = NA_real_,
@@ -178,10 +228,11 @@ for (pair in pair_names) {
     current_position = NULL,
     returns = xts(order.by = as.Date(character())),
     Sharpe = NA_real_,
-    final_return = NA_real_,
     current_equity = 1000,
     sum_returns = NA_real_,
-    mean_returns = NA_real_
+    mean_returns = NA_real_,
+    is_converged = FALSE,
+    num_of_trades = 0
   )
   for (i in 1:nrow(sp500_data_adj_strat)) {
     current_signal <- sp500_data_adj_strat[[pairs_singal_col]][i]
@@ -189,15 +240,15 @@ for (pair in pair_names) {
     if (is.null(current_position) || is.na(current_position) || current_position == "") {
       if (is.na(current_signal) || current_signal == "") {
         next
-      } else if (current_signal == "BUY" || current_signal == "SELL") {
+      } else if (current_signal == "LONG_SHORT" || current_signal == "SHORT_LONG") {
         portfolio$enter_cumret_first_stock <- sp500_data_adj_strat[[first_cumret_col]][i]
         portfolio$enter_cumret_second_stock <- sp500_data_adj_strat[[second_cumret_col]][i]
         portfolio$current_position <- current_signal
       }
-    } else if (current_position == "BUY") {
-      if ((sp500_data_adj_strat[[spread_zscore]][i] < 0) || (i == nrow(sp500_data_adj_strat))) { 
-        long_pos_return <- log(sp500_data_adj_strat[[first_cumret_col]][i]) - log(portfolio$enter_cumret_first_stock)
-        short_pos_return <- log(portfolio$enter_cumret_second_stock) - log(sp500_data_adj_strat[[second_cumret_col]][i])
+    } else if (current_position == "SHORT_LONG") {
+      if ((sp500_data_adj_strat[[spread_zscore]][i] < 0) || (i == nrow(sp500_data_adj_strat))) {
+        long_pos_return <- log(sp500_data_adj_strat[[second_cumret_col]][i]) - log(portfolio$enter_cumret_second_stock)
+        short_pos_return <- log(portfolio$enter_cumret_first_stock) - log(sp500_data_adj_strat[[first_cumret_col]][i])
         ret_value <- 0.5 * (long_pos_return + short_pos_return) - trade_cost  
         ret_date <- sp500_data_adj_strat$Date[i]
         portfolio$returns <- rbind(portfolio$returns, xts(ret_value, order.by = ret_date))
@@ -206,12 +257,12 @@ for (pair in pair_names) {
       } else if (sp500_data_adj_strat[[spread_zscore]][i] > 0) {
         next
       } else {
-        print("Missing Data on BUY position")
+        print("Missing Data on SHORT_LONG position")
       }
-    } else if (current_position == "SELL") {
+    } else if (current_position == "LONG_SHORT") {
       if ((sp500_data_adj_strat[[spread_zscore]][i] >= 0) || (i == nrow(sp500_data_adj_strat))) {
-        long_pos_return <- log(sp500_data_adj_strat[[second_cumret_col]][i]) - log(portfolio$enter_cumret_second_stock)
-        short_pos_return <- log(portfolio$enter_cumret_first_stock) - log(sp500_data_adj_strat[[first_cumret_col]][i])
+        long_pos_return <- log(sp500_data_adj_strat[[first_cumret_col]][i]) - log(portfolio$enter_cumret_first_stock)
+        short_pos_return <- log(portfolio$enter_cumret_second_stock) - log(sp500_data_adj_strat[[second_cumret_col]][i])
         ret_value <- 0.5 * (long_pos_return + short_pos_return) - trade_cost
         ret_date <- sp500_data_adj_strat$Date[i]
         portfolio$returns <- rbind(portfolio$returns, xts(ret_value, order.by = ret_date))
@@ -220,67 +271,188 @@ for (pair in pair_names) {
       } else if (sp500_data_adj_strat[[spread_zscore]][i] < 0) {
         next
       } else {
-        print("Missing Data on SELL position")
+        print("Missing Data on SHORT_LONG position")
       }
     }
   }
-Sharpe.annualizde
 
-  portfolio$Sharpe <- SharpeRatio.annualized(portfolio$returns, Rf = 0, FUN = "StdDev")
-  portfolio$mean_returns <- mean(portfolio$returns, na.rm = TRUE)
-  portfolio$sum_returns <- sum(portfolio$returns, na.rm = TRUE)
-  portfolio_list[[pair]] <- portfolio
+if (is.xts(portfolio$returns) && nrow(portfolio$returns) > 1) {
+  portfolio$Sharpe <- SharpeRatio.annualized(portfolio$returns, Rf = 0)
+} else {
+  portfolio$Sharpe <- 0
+}
+print(portfolio$pair_name)
+print(nrow(portfolio$returns))
+print(portfolio$returns)
+portfolio$is_converged <- nrow(portfolio$returns) > 1
+portfolio$num_of_trades <- nrow(portfolio$returns)
+portfolio$mean_returns <- mean(portfolio$returns, na.rm = TRUE)
+portfolio$sum_returns <- sum(portfolio$returns, na.rm = TRUE)
+portfolio_list[[pair]] <- portfolio
 }
 
+converged_portfolios <- sapply(portfolio_list, function(x) x$is_converged)
+converged_count <- sum(converged_portfolios, na.rm = TRUE)
+total_trades_converged <- sum(sapply(portfolio_list[converged_portfolios], function(x) x$num_of_trades), na.rm = TRUE)
+average_trades_per_month <- total_trades_converged / 6
+average_trades_converged <- mean(sapply(portfolio_list[converged_portfolios], function(x) x$num_of_trades), na.rm = TRUE)
+converged_returns <- sapply(portfolio_list[converged_portfolios], function(x) x$sum_returns)
+mean_converged_returns <- mean(converged_returns, na.rm = TRUE)
+mean_converged_returns
+median_converged_returns <- median(converged_returns, na.rm = TRUE)
+median_converged_returns
+kurtosis_converged_returns <- kurtosis(converged_returns, na.rm = TRUE)
+kurtosis_converged_returns
+skewness_converged_returns <- skewness(converged_returns, na.rm = TRUE)
+skewness_converged_returns
+converged_count
 
-sharpe_ratios <- sapply(portfolio_list, function(x) x$Sharpe)
-returns_list <- sapply(portfolio_list, function(x) x$returns)
-sum_returns <- sapply(portfolio_list, function(x) x$sum_returns)
-mean_returns <- sapply(portfolio_list, function(x) x$mean_returns)
+#Provide the same stats for unconverged portfolios
+unconverged_portfolios <- !converged_portfolios
+unconverged_count <- sum(unconverged_portfolios, na.rm = TRUE)
+total_trades_unconverged <- sum(sapply(portfolio_list[unconverged_portfolios], function(x) x$num_of_trades), na.rm = TRUE)
+average_trades_unconverged <- mean(sapply(portfolio_list[unconverged_portfolios], function(x) x$num_of_trades), na.rm = TRUE)
+unconverged_returns <- sapply(portfolio_list[unconverged_portfolios], function(x) x$sum_returns)
+mean_unconverged_returns <- mean(unconverged_returns, na.rm = TRUE)
+median_unconverged_returns <- median(unconverged_returns, na.rm = TRUE)
+kurtosis_unconverged_returns <- kurtosis(unconverged_returns, na.rm = TRUE)
+skewness_unconverged_returns <- skewness(unconverged_returns, na.rm = TRUE)
 
-mean_returns
-# mean_returns <- sapply(portfolio_list, function(x) mean(x$returns, na.rm = TRUE))
+mean_unconverged_returns
+median_unconverged_returns
+kurtosis_unconverged_returns
+skewness_unconverged_returns
 
-returns_list$AAPL_MSFT
-final_returns$AAPL_MSFT
-sum_returns['AAPL_MSFT']
-
-
-
-sharpe_ratios
-
-sum_returns
-
+# MSFT GOOGL cumret plot
 windows()
-hist(sharpe_ratios, main = "Sharpe Ratios of Pairs Trading Strategies", xlab = "Sharpe Ratio", col = "blue", breaks = 10)
+plot(sp500_data_adj_strat$Date, sp500_data_adj_strat$MSFT_cumret, type = "l", col = "blue", ylim = c(0, 1.5), 
+     xlab = "Data", ylab = "Skumulowane Zwroty", main = "Skumulowane Zwroty MSFT i GOOGL")
+lines(sp500_data_adj_strat$Date, sp500_data_adj_strat$GOOGL_cumret, col = "red")
+legend("topleft", legend = c("MSFT", "GOOGL"), col = c("blue", "red"), lty = 1)
+
+
+converged_returns
+
+mean_unconverged_returns
+median_unconverged_returns
+kurtosis_unconverged_returns
+skewness_unconverged_returns
+unconverged_count
+
+library(moments)
+sharpe_ratios <- sapply(portfolio_list, function(x) x$Sharpe)
 median_sharpe <- median(sharpe_ratios, na.rm = TRUE)
 average_sharpe <- mean(sharpe_ratios, na.rm = TRUE)
-abline(v = average_sharpe, col = "green", lwd = 2)
+skewness_sharpe <- skewness(sharpe_ratios, na.rm = TRUE)
+kurtosis_sharpe <- kurtosis(sharpe_ratios, na.rm = TRUE)
+
+# Sharpe ratios for converged portfolios
+converged_sharpe_ratios <- sharpe_ratios[converged_portfolios]
+mean_converged_sharpe <- mean(converged_sharpe_ratios, na.rm = TRUE)
+
+mean_converged_sharpe
+
+returns_list <- sapply(portfolio_list, function(x) x$sum_returns)
+mean_returns <- mean(returns_list, na.rm = TRUE)
+median_returns <- median(returns_list, na.rm = TRUE)
+skewness_returns <- skewness(returns_list, na.rm = TRUE)
+kurtosis_returns <- kurtosis(returns_list, na.rm = TRUE)
+
+returns_list
+
+mean_returns
+median_returns
+  skewness_returns
+kurtosis_returns
+
+#Count the number of trades
+total_trades <- sum(sapply(portfolio_list, function(x) x$num_of_trades), na.rm = TRUE)
+average_trades <- mean(sapply(portfolio_list, function(x) x$num_of_trades), na.rm = TRUE)
+
+# Average trades per month
+average_trades_per_month <- total_trades / 6
+
+total_trades
+average_trades
+total_trades / 9
+
+# Returns for the converged portfolios
+
+
+library(xts)
+library(PerformanceAnalytics)
+
+# 1. Collect all returns series into a list
+returns_xts_list <- lapply(portfolio_list, function(x) x$returns)
+
+returns_xts_list
+
+# 2. Merge all returns series by Date (outer join)
+all_returns_merged <- do.call(merge, c(returns_xts_list, all = TRUE))
+
+all_returns_merged
+
+# 3. Replace NAs with 0 (no trade on that date for that portfolio)
+all_returns_merged[is.na(all_returns_merged)] <- 0
+
+all_returns_merged
+# 4. Sum returns across portfolios for each date
+portfolio_total_returns <- xts(rowSums(all_returns_merged), order.by = index(all_returns_merged))
+
+portfolio_total_returns
+
+# 5. Calculate Sharpe Ratio for the summed portfolio
+portfolio_sharpe <- SharpeRatio.annualized(portfolio_total_returns, Rf = 0)
+
+# Output the Sharpe ratio
+portfolio_sharpe
+
+mean_ret <- mean(portfolio_total_returns, na.rm = TRUE)
+sd_ret <- sd(portfolio_total_returns, na.rm = TRUE)
+sharpe_simple <- mean_ret / sd_ret
+sharpe_annualized <- sharpe_simple * sqrt(252)  # Use 252 for daily, 52 for weekly, 12 for monthly
+sharpe_annualized
+
+# Only for converged portfolios
+converged_returns_xts_list <- lapply(portfolio_list[converged_portfolios], function(x) x$returns)
+
+# Merge all converged returns series by Date (outer join)
+converged_all_returns_merged <- do.call(merge, c(converged_returns_xts_list, all = TRUE))
+
+# Replace NAs with 0 (no trade on that date for that portfolio)
+converged_all_returns_merged[is.na(converged_all_returns_merged)] <- 0
+
+# Sum returns across converged portfolios for each date
+converged_portfolio_total_returns <- xts(rowSums(converged_all_returns_merged), order.by = index(converged_all_returns_merged))
+
+# Calculate Sharpe Ratio for the summed converged portfolio
+converged_portfolio_sharpe <- SharpeRatio.annualized(converged_portfolio_total_returns, Rf = 0)
+
+# Output the Sharpe ratio
+converged_portfolio_sharpe
+
+windows()
+hist(
+  sharpe_ratios,
+  main = "Sharpe Ratios of Pairs Trading Strategies",
+  xlab = "Wartości Sharpe'a",
+  ylab = "Częstotliwość",
+  col = "blue",
+  breaks = 10
+)
 legend("topright", legend = paste("Mean =", round(average_sharpe, 2)), 
        col = "green", lwd = 2)
 
 windows()
-hist(final_returns, main = "Returns of Pairs Trading Strategies", xlab = "Returns", col = "blue", breaks = 10)
-median_returns <- median(final_returns, na.rm = TRUE)
-average_returns <- mean(final_returns, na.rm = TRUE)
-abline(v = average_returns, col = "green", lwd = 2)
-legend("topright", legend = paste("Mean =", round(average_returns, 2)), 
-       col = "green", lwd = 2)
+hist(
+  returns_list,
+  main = "Returns of Pairs Trading Strategies",
+  xlab = "Zwroty",
+  ylab = "Częstotliwość",
+  col = "blue",
+  breaks = 10
+)
 
-windows()
-hist(sum_returns, main = "Sum Returns of Pairs Trading Strategies", xlab = "Sum Returns", col = "blue", breaks = 10)
-mean_sum_returns <- mean(sum_returns, na.rm = TRUE)
-abline(v = mean_sum_returns, col = "green", lwd = 2)
-legend("topright", legend = paste("Mean =", round(mean_sum_returns, 2)),
-        col = "green", lwd = 2)
-
-windows()
-plot(mean_returns, type = "h", main = "Mean Returns of Pairs Trading Strategies", 
-     xlab = "Pairs", ylab = "Mean Returns", col = "blue", lwd = 2)
-mean_mean_returns <- mean(mean_returns, na.rm = TRUE)
-abline(h = mean_mean_returns, col = "green", lwd = 2)
-legend("topright", legend = paste("Mean =", round(mean_mean_returns, 2)), 
-       col = "green", lwd = 2)
 
 
 sharpe_ratios
