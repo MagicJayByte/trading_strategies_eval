@@ -17,7 +17,7 @@ top_10 <- symbols <- c(
  
  top_10
 
-download_sp500_data <- function(start = "2010-01-01", end = "2024-12-31") {
+download_sp500_data <- function(start = "2010-01-01", end = "2025-06-30") {
   env <- new.env()
   getSymbols(top_10, src = "yahoo", from = start, to = end, env = env, auto.assign = TRUE)
   data_list <- eapply(env, function(x) as.data.frame(x))
@@ -27,6 +27,7 @@ download_sp500_data <- function(start = "2010-01-01", end = "2024-12-31") {
 sp500_data <- download_sp500_data()
 
 head(sp500_data$AAPL)
+tail(sp500_data$AAPL)
 save(sp500_data, file = "sp500_data.RData")
 load("sp500_data.RData")
 

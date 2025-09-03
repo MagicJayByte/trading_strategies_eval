@@ -20,8 +20,8 @@ load("sp500_data.RData")
 ls()
 names(sp500_data)
 
-start_date_hist <- as.Date("2022-01-01")
-end_date_hist <- as.Date("2022-12-31")
+start_date_hist <- as.Date("2024-01-01")
+end_date_hist <- as.Date("2024-12-31")
 
 adjusted_list <- list()
 
@@ -111,8 +111,8 @@ for (i in seq_along(pair_names)) {
   pair_stats$Mean[i] <- mean(values, na.rm = TRUE)
   pair_stats$SD[i] <- sd(values, na.rm = TRUE)
 }
-start_date_strat <- as.Date("2023-01-01")
-end_date_strat <- as.Date("2023-06-30")
+start_date_strat <- as.Date("2025-01-01")
+end_date_strat <- as.Date("2025-06-30")
 
 sp500_data_adj_strat <- sp500_data_adj %>%
   filter(Date >= start_date_strat & Date <= end_date_strat)
@@ -276,7 +276,11 @@ for (pair in pair_names) {
     }
   }
 
-if (is.xts(portfolio$returns) && nrow(portfolio$returns) > 1) {
+if (!is.null(portfolio$returns) &&
+  is.xts(portfolio$returns) &&
+  !is.null(nrow(portfolio$returns)) &&
+  !is.na(nrow(portfolio$returns)) &&
+  nrow(portfolio$returns) > 1) {
   portfolio$Sharpe <- SharpeRatio.annualized(portfolio$returns, Rf = 0)
 } else {
   portfolio$Sharpe <- 0
