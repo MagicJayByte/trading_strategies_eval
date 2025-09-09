@@ -208,7 +208,33 @@ for (pair in pair_names) {
   )
 }
 
-colnames(sp500_data_adj_strat)
+
+library(gridExtra)
+
+# Collect all plots in a list
+plot_list <- list()
+for (pair in pair_names) {
+  diff_col <- paste0(pair, "_ZScore")
+  signal_col <- paste0(pair, "_Signal")
+  sp500_data_adj_strat[[signal_col]] <- as.factor(sp500_data_adj_strat[[signal_col]])
+  p <- ggplot(sp500_data_adj_strat, aes(x = Date, y = .data[[diff_col]])) +
+    geom_line(color = "blue") +
+    geom_hline(yintercept = c(-2, 2), linetype = "dashed", color = "red") +
+    geom_point(aes(color = .data[[signal_col]]), size = 1.5) +
+    labs(title = paste("Z-Score for", pair), x = "Date", y = "Z-Score") +
+    theme_minimal() +
+    scale_color_manual(values = c("LONG_SHORT" = "green", "SHORT_LONG" = "red"),
+                       labels = c("LONG_SHORT" = "Long/Short Signal", "SHORT_LONG" = "Short/Long Signal")) +
+    theme(legend.position = "none") # Remove legend
+  plot_list[[pair]] <- p
+}
+
+# Save all plots in a 9x5 grid as one image
+png("pairs_trading_zscore_signals_grid.png", width = 5*900, height = 9*500, res = 100)
+grid.arrange(grobs = plot_list, nrow = 9, ncol = 5)
+dev.off()
+
+
 
 # install.packages("PerformanceAnalytics")
 library(PerformanceAnalytics)
@@ -254,6 +280,8 @@ for (pair in pair_names) {
         portfolio$returns <- rbind(portfolio$returns, xts(ret_value, order.by = ret_date))
         portfolio$current_equity <- portfolio$current_equity * (1 + ret_value)
         portfolio$current_position <- NULL
+        if (i < nrow(sp500_data_adj_strat)) {
+          portfolio$is_converged <- TRUE}
       } else if (sp500_data_adj_strat[[spread_zscore]][i] > 0) {
         next
       } else {
@@ -268,6 +296,8 @@ for (pair in pair_names) {
         portfolio$returns <- rbind(portfolio$returns, xts(ret_value, order.by = ret_date))
         portfolio$current_equity <- portfolio$current_equity * (1 + (ret_value))
         portfolio$current_position <- NULL
+        if (i < nrow(sp500_data_adj_strat)) {
+          portfolio$is_converged <- TRUE}
       } else if (sp500_data_adj_strat[[spread_zscore]][i] < 0) {
         next
       } else {
@@ -288,12 +318,13 @@ if (!is.null(portfolio$returns) &&
 print(portfolio$pair_name)
 print(nrow(portfolio$returns))
 print(portfolio$returns)
-portfolio$is_converged <- nrow(portfolio$returns) > 1
-portfolio$num_of_trades <- nrow(portfolio$returns)
+print(nrow(portfolio$returns))
+portfolio$num_of_trades <- if (!is.null(nrow(portfolio$returns))) nrow(portfolio$returns) else 0
 portfolio$mean_returns <- mean(portfolio$returns, na.rm = TRUE)
 portfolio$sum_returns <- sum(portfolio$returns, na.rm = TRUE)
 portfolio_list[[pair]] <- portfolio
 }
+
 
 converged_portfolios <- sapply(portfolio_list, function(x) x$is_converged)
 converged_count <- sum(converged_portfolios, na.rm = TRUE)
@@ -311,9 +342,14 @@ skewness_converged_returns <- skewness(converged_returns, na.rm = TRUE)
 skewness_converged_returns
 converged_count
 
+average_trades_per_month
+
 #Provide the same stats for unconverged portfolios
 unconverged_portfolios <- !converged_portfolios
 unconverged_count <- sum(unconverged_portfolios, na.rm = TRUE)
+
+unconverged_count
+
 total_trades_unconverged <- sum(sapply(portfolio_list[unconverged_portfolios], function(x) x$num_of_trades), na.rm = TRUE)
 average_trades_unconverged <- mean(sapply(portfolio_list[unconverged_portfolios], function(x) x$num_of_trades), na.rm = TRUE)
 unconverged_returns <- sapply(portfolio_list[unconverged_portfolios], function(x) x$sum_returns)
@@ -366,12 +402,15 @@ returns_list
 
 mean_returns
 median_returns
-  skewness_returns
+skewness_returns
 kurtosis_returns
 
 #Count the number of trades
 total_trades <- sum(sapply(portfolio_list, function(x) x$num_of_trades), na.rm = TRUE)
 average_trades <- mean(sapply(portfolio_list, function(x) x$num_of_trades), na.rm = TRUE)
+
+
+average_trades
 
 # Average trades per month
 average_trades_per_month <- total_trades / 6
