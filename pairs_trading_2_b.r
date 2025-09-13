@@ -20,9 +20,10 @@ load("sp500_data.RData")
 ls()
 names(sp500_data)
 
-start_date_hist <- as.Date("2024-01-01")
+start_date <- as.Date("2024-01-01")
+end_date <- as.Date("2025-06-30")
 end_date_hist <- as.Date("2024-12-31")
-
+start_date_strat <- as.Date("2025-01-01")
 adjusted_list <- list()
 
 for (symbol in top_10) {
@@ -45,18 +46,96 @@ sp500_data_adj <- sp500_data_adj[order(sp500_data_adj$Date), ]
 save(sp500_data_adj, file = "sp500_data_adj.RData")
 load("sp500_data_adj.RData")
 
-sp500_data_adj_hist <- sp500_data_adj %>%
-  filter(Date >= start_date_hist & Date <= end_date_hist)
+sp500_data_adj_full <- sp500_data_adj %>%
+  filter(Date >= start_date & Date <= end_date)
+
+
 
 for (symbol in top_10) {
   adj_col <- paste0(symbol, ".Adjusted")
-  if (!(adj_col %in% colnames(sp500_data_adj_hist))) {
+  if (!(adj_col %in% colnames(sp500_data_adj_full))) {
     stop(paste("Adjusted column for", symbol, "not found in historical data."))}
   else {
-    cumret_col <- (sp500_data_adj_hist[[adj_col]] / sp500_data_adj_hist[[adj_col]][1]) - 1
+    cumret_col <- log(sp500_data_adj_full[[adj_col]] / sp500_data_adj_full[[adj_col]][1])
     # cumret_col[cumret_col == 0] <- 0.0001
-    sp500_data_adj_hist[[paste0(symbol, "_cumret")]] <- cumret_col}}
+    sp500_data_adj_full[[paste0(symbol, "_cumret")]] <- cumret_col}}
 
+#Get me a data frame with descriptive stats for stock cumulative returns: mean, sd , min, 25th percentile, 75th percentile, max, skewness, kurtosis
+library(moments)
+cumret_stats <- data.frame(
+  Stock = character(),
+  Mean = numeric(),
+  SD = numeric(),
+  Min = numeric(),
+  P25 = numeric(),
+  P75 = numeric(),
+  Max = numeric(),
+  Skewness = numeric(),
+  Kurtosis = numeric(),
+  stringsAsFactors = FALSE
+)
+for (symbol in top_10) {
+  cumret_col <- paste0(symbol, "_cumret")
+  if (!(cumret_col %in% colnames(sp500_data_adj_full))) {
+    stop(paste("Cumulative returns column for", symbol, "not found in historical data."))}
+  else {
+    values <- sp500_data_adj_full[[cumret_col]]
+    cumret_stats <- rbind(cumret_stats, data.frame(
+      Stock = symbol,
+      Mean = mean(values, na.rm = TRUE),
+      SD = sd(values, na.rm = TRUE),
+      Min = min(values, na.rm = TRUE),
+      P25 = quantile(values, 0.25, na.rm = TRUE),
+      P75 = quantile(values, 0.75, na.rm = TRUE),
+      Max = max(values, na.rm = TRUE),
+      Skewness = skewness(values, na.rm = TRUE),
+      Kurtosis = kurtosis(values, na.rm = TRUE)
+    ))}}
+
+# cumret_stats
+# install.packages("writexl")
+# library(writexl)
+# write_xlsx(cumret_stats, "cumret_stats.xlsx")
+
+logret_stats_full <- data.frame(
+  Stock = character(),
+  Mean = numeric(),
+  SD = numeric(),
+  Min = numeric(),
+  P25 = numeric(),
+  P75 = numeric(),
+  Max = numeric(),
+  Skewness = numeric(),
+  Kurtosis = numeric(),
+  stringsAsFactors = FALSE
+)
+
+for (symbol in top_10) {
+  adj_col <- paste0(symbol, ".Adjusted")
+  if (!(adj_col %in% colnames(sp500_data_adj_full))) {
+    stop(paste("Adjusted column for", symbol, "not found in full data."))
+  } else {
+    prices <- sp500_data_adj_full[[adj_col]]
+    log_returns <- diff(log(prices))
+    logret_stats_full <- rbind(logret_stats_full, data.frame(
+      Stock = symbol,
+      Mean = mean(log_returns, na.rm = TRUE),
+      SD = sd(log_returns, na.rm = TRUE),
+      Min = min(log_returns, na.rm = TRUE),
+      P25 = quantile(log_returns, 0.25, na.rm = TRUE),
+      P75 = quantile(log_returns, 0.75, na.rm = TRUE),
+      Max = max(log_returns, na.rm = TRUE),
+      Skewness = skewness(log_returns, na.rm = TRUE),
+      Kurtosis = kurtosis(log_returns, na.rm = TRUE)
+    ))
+  }
+}
+
+# write_xlsx(logret_stats_full, "logret_stats_full.xlsx")
+
+
+sp500_data_adj_hist <- sp500_data_adj_full%>%
+  filter(Date >= start_date & Date <= end_date_hist)
 
 
 # Plot cumulative returns for each stock
@@ -112,22 +191,11 @@ for (i in seq_along(pair_names)) {
   pair_stats$Mean[i] <- mean(values, na.rm = TRUE)
   pair_stats$SD[i] <- sd(values, na.rm = TRUE)
 }
-start_date_strat <- as.Date("2025-01-01")
-end_date_strat <- as.Date("2025-06-30")
 
-sp500_data_adj_strat <- sp500_data_adj %>%
-  filter(Date >= start_date_strat & Date <= end_date_strat)
+sp500_data_adj_strat <- sp500_data_adj_full %>%
+  filter(Date >= start_date_strat & Date <= end_date)
 
 head(sp500_data_adj_strat)
-
-for (symbol in top_10) {
-  adj_col <- paste0(symbol, ".Adjusted")
-  if (!(adj_col %in% colnames(sp500_data_adj_strat))) {
-    stop(paste("Adjusted column for", symbol, "not found in historical data."))}
-  else {
-    cumret_col <- (sp500_data_adj_strat[[adj_col]] / sp500_data_adj_strat[[adj_col]][1]) - 1
-    # cumret_col[cumret_col == 0] <- 0.0001
-    sp500_data_adj_strat[[paste0(symbol, "_cumret")]] <- cumret_col}}
 
 # Plot cumulative returns for each stock in the strategy period
 cumulative_returns_list_strat <- list()
@@ -195,6 +263,7 @@ for (pair in pair_names) {
   p <- ggplot(sp500_data_adj_strat, aes(x = Date, y = .data[[diff_col]])) +
     geom_line(color = "blue") +
     geom_hline(yintercept = c(-2, 2), linetype = "dashed", color = "red") +
+    geom_hline(yintercept = c(-0.2, 0.2), linetype = "dotted", color = "orange") +
     geom_point(aes(color = .data[[signal_col]]), size = 1.5) +
     labs(title = paste("Z-Score for", pair), x = "Date", y = "Z-Score") +
     theme_minimal() +
@@ -223,6 +292,7 @@ for (pair in pair_names) {
     geom_line(color = "blue") +
     geom_hline(yintercept = c(-2, 2), linetype = "dashed", color = "red") +
     geom_point(aes(color = .data[[signal_col]]), size = 1.5) +
+    geom_hline(yintercept = c(-0.2, 0.2), linetype = "dotted", color = "purple") +
     labs(title = paste("Z-Score for", pair), x = "Date", y = "Z-Score") +
     theme_minimal() +
     scale_color_manual(values = c("LONG_SHORT" = "green", "SHORT_LONG" = "red"),
@@ -231,9 +301,22 @@ for (pair in pair_names) {
   plot_list[[pair]] <- p
 }
 
-# Save all plots in a 9x5 grid as one image
-png("pairs_trading_zscore_signals_grid.png", width = 5*900, height = 9*500, res = 100)
-grid.arrange(grobs = plot_list, nrow = 9, ncol = 5)
+# # Save all plots in a 9x5 grid as one image
+# png("pairs_trading_zscore_signals_grid.png", width = 5*900, height = 9*500, res = 100)
+# grid.arrange(grobs = plot_list, nrow = 9, ncol = 5)
+# dev.off()
+
+plot_list_1 <- plot_list[1:24]
+plot_list_2 <- plot_list[25:45]
+
+# First grid: 8x3 (24 charts)
+png("pairs_trading_zscore_signals_grid_3x8.png", width = 3*900, height = 8*500, res = 100)
+grid.arrange(grobs = plot_list_1, nrow = 8, ncol = 3)
+dev.off()
+
+# Second grid: 7x3 (21 charts)
+png("pairs_trading_zscore_signals_grid_3x7.png", width = 3*900, height = 7*500, res = 100)
+grid.arrange(grobs = plot_list_2, nrow = 7, ncol = 3)
 dev.off()
 
 
@@ -278,8 +361,8 @@ for (pair in pair_names) {
       }
     } else if (current_position == "SHORT_LONG") {
       if ((sp500_data_adj_strat[[spread_zscore]][i] <= 0.2) || (i == nrow(sp500_data_adj_strat))) {
-        long_pos_return <- ((sp500_data_adj_strat[[second_cumret_col]][i]+1)/(portfolio$enter_cumret_second_stock + 1)) - 1
-        short_pos_return <- ((portfolio$enter_cumret_first_stock + 1)/(sp500_data_adj_strat[[first_cumret_col]][i] + 1)) - 1
+        long_pos_return <- sp500_data_adj_strat[[second_cumret_col]][i] - portfolio$enter_cumret_second_stock
+        short_pos_return <- portfolio$enter_cumret_first_stock - sp500_data_adj_strat[[first_cumret_col]][i]
         ret_value <- 0.5 * (long_pos_return + short_pos_return) - trade_cost
         ret_date <- sp500_data_adj_strat$Date[i]
         portfolio$returns <- rbind(portfolio$returns, xts(ret_value, order.by = ret_date))
@@ -311,8 +394,8 @@ for (pair in pair_names) {
       }
     } else if (current_position == "LONG_SHORT") {
       if ((sp500_data_adj_strat[[spread_zscore]][i] >= -0.2) || (i == nrow(sp500_data_adj_strat))) {
-        long_pos_return <- ((sp500_data_adj_strat[[first_cumret_col]][i] + 1)/(portfolio$enter_cumret_first_stock + 1)) - 1
-        short_pos_return <- ((portfolio$enter_cumret_second_stock + 1)/sp500_data_adj_strat[[second_cumret_col]][i]) - 1
+        long_pos_return <- sp500_data_adj_strat[[first_cumret_col]][i] - portfolio$enter_cumret_first_stock
+        short_pos_return <- portfolio$enter_cumret_second_stock - sp500_data_adj_strat[[second_cumret_col]][i]
         ret_value <- 0.5 * (long_pos_return + short_pos_return) - trade_cost
         ret_date <- sp500_data_adj_strat$Date[i]
         portfolio$returns <- rbind(portfolio$returns, xts(ret_value, order.by = ret_date))
@@ -360,6 +443,7 @@ portfolio_list[[pair]] <- portfolio
 
 
 
+
 converged_portfolios <- sapply(portfolio_list, function(x) x$is_converged)
 converged_count <- sum(converged_portfolios, na.rm = TRUE)
 total_trades_converged <- sum(sapply(portfolio_list[converged_portfolios], function(x) x$num_of_trades), na.rm = TRUE)
@@ -367,9 +451,12 @@ average_trades_per_month <- total_trades_converged / 6
 average_trades_converged <- mean(sapply(portfolio_list[converged_portfolios], function(x) x$num_of_trades), na.rm = TRUE)
 converged_returns <- sapply(portfolio_list[converged_portfolios], function(x) x$sum_returns)
 mean_converged_returns <- mean(converged_returns, na.rm = TRUE)
+converged_portfolios
+converged_count
 total_trades_converged
 converged_returns
 mean_converged_returns
+average_trades_converged
 median_converged_returns <- median(converged_returns, na.rm = TRUE)
 median_converged_returns
 kurtosis_converged_returns <- kurtosis(converged_returns, na.rm = TRUE)
@@ -394,6 +481,8 @@ mean_unconverged_returns <- mean(unconverged_returns, na.rm = TRUE)
 median_unconverged_returns <- median(unconverged_returns, na.rm = TRUE)
 kurtosis_unconverged_returns <- kurtosis(unconverged_returns, na.rm = TRUE)
 skewness_unconverged_returns <- skewness(unconverged_returns, na.rm = TRUE)
+
+total_trades_unconverged
 
 mean_unconverged_returns
 median_unconverged_returns
@@ -504,8 +593,18 @@ sharpe_annualized
 # Only for converged portfolios
 converged_returns_xts_list <- lapply(portfolio_list[converged_portfolios], function(x) x$returns)
 
+# Create a full date sequence from your strategy period
+full_dates <- as.Date(sp500_data_adj_strat$Date)
+
 # Merge all converged returns series by Date (outer join)
 converged_all_returns_merged <- do.call(merge, c(converged_returns_xts_list, all = TRUE))
+
+# Reindex to include all dates, filling missing dates with NA
+converged_all_returns_merged <- merge(
+  xts(matrix(NA, nrow = length(full_dates), ncol = ncol(converged_all_returns_merged)), order.by = full_dates),
+  converged_all_returns_merged,
+  fill = NA
+)
 
 # Replace NAs with 0 (no trade on that date for that portfolio)
 converged_all_returns_merged[is.na(converged_all_returns_merged)] <- 0
@@ -538,7 +637,7 @@ hist(
   xlab = "Zwroty",
   ylab = "Częstotliwość",
   col = "blue",
-  breaks = 10
+  breaks = 45
 )
 
 
